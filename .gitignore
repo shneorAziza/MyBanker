@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# dotenv files with secrets
+.env
+.env.*
+
+# Database
+*.db
+*.sqlite3
+
+# Migrations (if using Alembic)
+migrations/versions/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+*.docker
+docker-compose.override.yml
+
+# Byte-compiled / cache
+*.pyc
+*.pyo
+*.pyd
