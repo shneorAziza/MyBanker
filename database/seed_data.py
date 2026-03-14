@@ -1,24 +1,33 @@
 from datetime import date
 from database.db import SessionLocal, engine, Base
 from database.models import User, Transaction
+from datetime import datetime
 
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 
-session = SessionLocal()
+db = SessionLocal()
 
-# Example user
-user = User(name="Shneor Aziza", email="shneor@example.com")
-session.add(user)
-session.commit()
+# 1. יצירת משתמשים
+yossi = User(name="יוסי", email="yossi@test.com")
+dana = User(name="דנה", email="dana@test.com")
+db.add_all([yossi, dana])
+db.commit()
 
-# Example transactions for the user
-transactions = [
-    Transaction(user_id=user.id, amount=15000, category="salary", description="March salary", date=date(2026,3,1)),
-    Transaction(user_id=user.id, amount=-2000, category="groceries", description="Supermarket", date=date(2026,3,5)),
-    Transaction(user_id=user.id, amount=-1000, category="entertainment", description="Movies", date=date(2026,3,7)),
-    Transaction(user_id=user.id, amount=-3000, category="travel", description="Weekend trip", date=date(2026,3,10)),
-]
+# 2. טרנזקציות ליוסי (ID: 1) - מצב מעולה
+db.add_all([
+    Transaction(user_id=yossi.id, amount=20000, category="Salary", description="משכורת הייטק", date=datetime.now()),
+    Transaction(user_id=yossi.id, amount=-1500, category="Rent", description="שכר דירה", date=datetime.now()),
+    Transaction(user_id=yossi.id, amount=-500, category="Food", description="סופר", date=datetime.now()),
+])
 
-session.add_all(transactions)
-session.commit()
-session.close()
+# 3. טרנזקציות לדנה (ID: 2) - מצב בעייתי
+db.add_all([
+    Transaction(user_id=dana.id, amount=6000, category="Salary", description="משכורת חלקית", date=datetime.now()),
+    Transaction(user_id=dana.id, amount=-4000, category="Shopping", description="קניון ומותגים", date=datetime.now()),
+    Transaction(user_id=dana.id, amount=-2500, category="Entertainment", description="מסעדות יוקרה", date=datetime.now()),
+])
+
+db.commit()
+db.close()
+print("Database re-seeded successfully with 2 distinct users!")

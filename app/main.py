@@ -1,16 +1,16 @@
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from langchain_core.messages import HumanMessage, SystemMessage
 from database.db import SessionLocal
-from database.models import User, Transaction
-from app.core.openai_client import client
-from app.tools.rag_tool import search_financial_knowledge
+from database.models import User
+from app.agents.graph import app_graph
 
 app = FastAPI(title="My Banker API")
 
 class QuestionRequest(BaseModel):
     question: str
-
+    user_id: int = 1
 
 def get_db():
     db = SessionLocal()
@@ -19,55 +19,50 @@ def get_db():
     finally:
         db.close()
 
-@app.post("/ask")
-def ask_banker(request: QuestionRequest, db: Session = Depends(get_db)):
-    question = request.question
 
-    user = db.query(User).first()
+@app.post("/ask")
+async def ask_banker(request: QuestionRequest, db: Session = Depends(get_db)):
+    # 1. אימות המשתמש (בדיקה שהוא קיים ב-DB לפני שמתחילים)
+    user = db.query(User).filter(User.id == request.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    transactions = db.query(Transaction).filter(Transaction.user_id == user.id).all()
-    balance = sum(t.amount for t in transactions)
-    transactions_summary = "\n".join(
-        f"{t.date}: {t.category} {t.amount} ({t.description})" for t in transactions
-    )
 
-    rag_results = search_financial_knowledge(question, limit=2)
-    context_text = "\n".join(f"{res.source}: {res.content}" for res in rag_results)
+    # 2. הגדרת ה-System Prompt (ההנחיות הכלליות)
+    # שים לב: אנחנו לא מזריקים פה את כל הטרנזקציות, כי הסוכן ימשוך אותן עם הכלי get_user_balance_tool במידת הצורך
+    system_instructions = SystemMessage(content=(
+        f"אתה עוזר בנקאי אישי בשם 'My Banker'. המשתמש הוא {user.name} (ID: {user.id}).\n"
+        "חוק בל יעבור: לפני שאתה נותן המלצה על סכומי חיסכון, השקעות או ניהול תקציב, "
+        "עליך חובה להשתמש בכלי 'get_user_balance_tool' כדי לראות את המצב הפיננסי האמיתי.\n"
+        "אל תענה תשובות כלליות אם יש לך אפשרות לבסס אותן על נתוני המשתמש והידע המקצועי ב-RAG."
+    ))
 
-    prompt_system = f"""
-    אתה עוזר בנקאי אישי מקצועי בשם 'My Banker'.
-    פרטי משתמש: {user.name}
-    יתרה נוכחית: {balance} ש״ח
-    פירוט עסקאות אחרונות:
-    {transactions_summary}
-
-    מידע פיננסי רלוונטי לשאלה (השתמש בו כדי לענות בצורה מקצועית):
-    {context_text}
-
-    הנחיות:
-    - ענה על סמך נתוני המשתמש והמידע הפיננסי שסופק.
-    - אם המידע הפיננסי לא רלוונטי ישירות, השתמש בידע הכללי שלך אך ציין זאת.
-    - היה תמציתי, מקצועי ומניע לפעולה.
-    """
-    
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": prompt_system},
-            {"role": "user", "content": question}
-        ],
-        max_tokens=300,
-        temperature=0.5
-    )
-    print("OpenAI query:", prompt_system, question)
-
-    answer = response.choices[0].message.content
-    return {
-        "answer": answer,
-        "context_used": [res.source for res in rag_results]
+    # 3. הכנת המצב הראשוני עבור LangGraph
+    # אנחנו מעבירים את ה-user_id בתוך ה-config כדי שהכלים יוכלו להשתמש בו
+    initial_state = {
+        "messages": [system_instructions, HumanMessage(content=request.question)],
+        "user_info": {"id": user.id, "name": user.name},
+        "retrieved_context": []
     }
+    
+    config = {"configurable": {"user_id": user.id}}
+
+    try:
+        # 4. הרצת הגרף (אסינכרוני)
+        result = await app_graph.ainvoke(initial_state, config=config)
+        
+        # 5. שליפת התשובה הסופית
+        final_message = result["messages"][-1]
+        
+        return {
+            "answer": final_message.content,
+            "user_id": user.id,
+            # כאן תוכל לראות אילו כלים הופעלו בדרך
+            "logic_steps": [m.type for m in result["messages"]] 
+        }
+    except Exception as e:
+        print(f"Error running LangGraph: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
 
 @app.get("/")
 def read_root():
